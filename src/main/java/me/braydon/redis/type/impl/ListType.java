@@ -28,7 +28,7 @@ public final class ListType extends KeyType {
      */
     @Override
     public void populateData(@NonNull Jedis jedis, @NonNull String key) {
-        long length = jedis.llen(key);
+        long length = jedis.llen(key); // The length of the list
         data = jedis.lrange(key, 0, length); // Get the elements from 0 to the length
     }
 

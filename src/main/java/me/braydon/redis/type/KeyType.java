@@ -3,10 +3,7 @@ package me.braydon.redis.type;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import lombok.NonNull;
-import me.braydon.redis.type.impl.HashType;
-import me.braydon.redis.type.impl.ListType;
-import me.braydon.redis.type.impl.SetType;
-import me.braydon.redis.type.impl.StringType;
+import me.braydon.redis.type.impl.*;
 import redis.clients.jedis.Jedis;
 
 import java.util.Collections;
@@ -28,6 +25,7 @@ public abstract class KeyType {
             "string", StringType.class,
             "list", ListType.class,
             "set", SetType.class,
+            "zset", SortedSetType.class,
             "hash", HashType.class
     ));
 

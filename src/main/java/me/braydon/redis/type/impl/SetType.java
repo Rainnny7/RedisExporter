@@ -11,7 +11,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * The implementation of the "hash" {@link KeyType}.
+ * The implementation of the "set" {@link KeyType}.
  *
  * @author Braydon
  */
