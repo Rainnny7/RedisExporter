@@ -5,9 +5,12 @@ import com.google.gson.JsonObject;
 import lombok.*;
 import me.braydon.redis.type.KeyType;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.resps.Tuple;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -20,19 +23,39 @@ public final class SortedSetType extends KeyType {
 
     /**
      * Populate this object with the data
-     * from the given key.
+     * from the given key in Redis.
      * <p>See implementations</p>
      *
      * @param jedis the jedis connection
-     * @param key   the key to get the data from
+     * @param key the key to get the data from
+     * @see Jedis for jedis
      */
     @Override
-    public void populateData(@NonNull Jedis jedis, @NonNull String key) {
+    public void populateFromRedis(@NonNull Jedis jedis, @NonNull String key) {
         Set<SortedSetEntry> data = new HashSet<>();
         for (Tuple entry : jedis.zrangeByScoreWithScores(key, "-inf", "+inf")) {
             data.add(new SortedSetEntry(entry.getElement(), entry.getScore()));
         }
         this.data = data;
+    }
+
+    /**
+     * Save the data in the given json element
+     * to Redis.
+     *
+     * @param pipeline the pipelined jedis connection
+     * @param key the key to save the data to
+     * @param jsonElement the json element containing the data
+     * @see Pipeline for pipeline
+     * @see JsonElement for the json element
+     */
+    @Override
+    public void saveToRedis(@NonNull Pipeline pipeline, @NonNull String key, @NonNull JsonElement jsonElement) {
+        Map<String, Double> entries = new HashMap<>();
+        for (Map.Entry<String, JsonElement> entry : jsonElement.getAsJsonObject().entrySet()) {
+            entries.put(entry.getKey(), entry.getValue().getAsDouble());
+        }
+        pipeline.zadd(key, entries); // Save the zset
     }
 
     /**

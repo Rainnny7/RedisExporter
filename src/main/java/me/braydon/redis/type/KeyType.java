@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import lombok.NonNull;
 import me.braydon.redis.type.impl.*;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Pipeline;
 
 import java.util.Collections;
 import java.util.Map;
@@ -31,13 +32,26 @@ public abstract class KeyType {
 
     /**
      * Populate this object with the data
-     * from the given key.
+     * from the given key in Redis.
      * <p>See implementations</p>
      *
      * @param jedis the jedis connection
      * @param key the key to get the data from
+     * @see Jedis for jedis
      */
-    public abstract void populateData(@NonNull Jedis jedis, @NonNull String key);
+    public abstract void populateFromRedis(@NonNull Jedis jedis, @NonNull String key);
+
+    /**
+     * Save the data in the given json element
+     * to Redis.
+     *
+     * @param pipeline the pipelined jedis connection
+     * @param key the key to save the data to
+     * @param jsonElement the json element containing the data
+     * @see Pipeline for pipeline
+     * @see JsonElement for the json element
+     */
+    public abstract void saveToRedis(@NonNull Pipeline pipeline, @NonNull String key, @NonNull JsonElement jsonElement);
 
     /**
      * Get the json object representation of

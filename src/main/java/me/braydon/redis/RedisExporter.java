@@ -2,6 +2,7 @@ package me.braydon.redis;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
@@ -13,13 +14,16 @@ import me.braydon.redis.type.KeyType;
 import redis.clients.jedis.DefaultJedisClientConfig;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.Pipeline;
 
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -72,6 +76,12 @@ public final class RedisExporter {
                     .withRequiredArg() // Required the argument
                     .ofType(File.class) // Use file
                     .defaultsTo(new File("data.json")); // Default to data.json
+
+            // Whether the user wants to confirm the import of the data file
+            acceptsAll(Collections.singletonList("confirm"), "Whether to confirm the import");
+
+            // Whether the user wants to flush the entire database before importing their data
+            acceptsAll(Collections.singletonList("flush"), "Whether to flush the database prior to importing");
         }};
         OptionSet options = null;
         try { // Parse the arguments
@@ -94,6 +104,8 @@ public final class RedisExporter {
         int index = (int) options.valueOf("index");
         boolean export = (boolean) options.valueOf("export");
         File dataFile = (File) options.valueOf("file");
+        boolean confirm = options.has("confirm");
+        boolean flush = options.has("flush");
 
         // Validate the data file
         if (dataFile.isDirectory()) { // Can only use files
@@ -104,6 +116,13 @@ public final class RedisExporter {
             throw new IllegalArgumentException("Cannot import a file that doesn't exist");
         } else if (!FileUtils.getFileExtension(dataFile).equalsIgnoreCase("json")) { // Can only handle json files
             throw new IllegalArgumentException("The data file must be a JSON file");
+        }
+
+        // Confirm the user wants to overwrite any existing data
+        if (!export && !confirm) {
+            System.err.println("WARNING: You are about to import data into the database, this will overwrite any existing data.");
+            System.err.println("If you'd wish to continue, please re-run the command with the --confirm flag");
+            return;
         }
 
         // Log the connection
@@ -120,7 +139,7 @@ public final class RedisExporter {
             if (export) { // Export the database
                 exportDatabase(jedis, dataFile);
             } else { // Import the database
-                importDatabase(jedis, dataFile);
+                importDatabase(jedis, flush, dataFile);
             }
         }
     }
@@ -152,7 +171,7 @@ public final class RedisExporter {
             }
             try {
                 KeyType keyType = type.getConstructor().newInstance(); // Constructor a new instance of the key type class
-                keyType.populateData(jedis, key); // Populate the object with the data from Redis
+                keyType.populateFromRedis(jedis, key); // Populate the object with the data from Redis
 
                 JsonObject keyObject = new JsonObject();
                 keyObject.addProperty("type", typeName); // Add the type name to the key json object
@@ -165,7 +184,7 @@ public final class RedisExporter {
                 ex.printStackTrace();
                 continue;
             }
-            System.err.printf("Exported key '%s' (%s)%n", key, typeName); // Log that the key was exported
+            System.out.printf("Exported key '%s' (%s)%n", key, typeName); // Log that the key was exported
         }
         // Save the json to the data file
         try (FileWriter writer = new FileWriter(dataFile)) {
@@ -173,17 +192,74 @@ public final class RedisExporter {
         } catch (IOException ex) {
             ex.printStackTrace();
         }
-
         // Log that the export has finished
-        System.err.printf("Export finished in %sms (success: %s, failed: %s, total: %s)%n",
+        System.out.printf("Export finished in %sms (success: %s, failed: %s, total: %s)%n",
                 System.currentTimeMillis() - before,
-                keys.size() - failed,
-                failed,
-                keys.size()
+                keys.size() - failed, // The amount of keys successfully exported
+                failed, // The amount of keys that failed to export
+                keys.size() // The total amount of keys in the database
         );
     }
 
-    private static void importDatabase(@NonNull Jedis jedis, @NonNull File dataFile) {
-        throw new UnsupportedOperationException("Not implemented yet");
+    /**
+     * Import the keys from the given file into the database.
+     *
+     * @param jedis the jedis connection
+     * @param flush whether to flush the database prior to importing
+     * @param dataFile the data file to import from
+     */
+    private static void importDatabase(@NonNull Jedis jedis, boolean flush, @NonNull File dataFile) {
+        if (flush) { // If the user wants to flush the database, flush it
+            long size = jedis.dbSize(); // The amount of keys in the database
+            jedis.flushDB(); // Flush the database
+            if (size > 0) { // If there were any key(s) flushed, log it
+                System.out.printf("Flushed %s key(s)%n", size);
+            }
+        }
+        long before = System.currentTimeMillis(); // Get the time before the import
+        int failed = 0; // The amount of keys that failed to import
+        int keyCount = 0; // The amount of keys in the file
+        try (FileReader reader = new FileReader(dataFile)) {
+            JsonObject keysObject = GSON.fromJson(reader, JsonObject.class); // Get the keys json object from the file
+            Set<Map.Entry<String, JsonElement>> keys = keysObject.entrySet();
+            keyCount = keys.size();
+
+            Pipeline pipelined = jedis.pipelined(); // Create a pipeline to execute the commands in
+            for (Map.Entry<String, JsonElement> entry : keys) {
+                String key = entry.getKey();
+                JsonObject keyObject = entry.getValue().getAsJsonObject();
+                String typeName = keyObject.get("type").getAsString();
+                long ttl = keyObject.get("ttl").getAsLong();
+                Class<? extends KeyType> type = KeyType.TYPES.get(typeName); // Get the type of the key
+                if (type == null) { // If the key type is not supported, skip it
+                    failed++;
+                    System.err.printf("Cannot import '%s' as the type (%s) is not supported%n", key, typeName);
+                    continue;
+                }
+                try {
+                    KeyType keyType = type.getConstructor().newInstance(); // Constructor a new instance of the key type class
+                    JsonElement data = entry.getValue().getAsJsonObject().get("data");
+                    keyType.saveToRedis(pipelined, key, data); // Save the key to redis
+                    if (ttl > 0) { // If the key has a time to live rule, set it in Redis
+                        pipelined.expire(key, ttl);
+                    }
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException ex) {
+                    failed++;
+                    ex.printStackTrace();
+                    continue;
+                }
+                System.out.printf("Imported key '%s' (%s)%n", key, typeName); // Log that the key was imported
+            }
+            pipelined.sync(); // Execute the commands in the pipeline
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        // Log that the import has finished
+        System.out.printf("Import finished in %sms (success: %s, failed: %s, total: %s)%n",
+                System.currentTimeMillis() - before,
+                keyCount - failed, // The amount of keys successfully imported
+                failed, // The amount of keys that failed to import
+                keyCount // The total amount of keys in the file
+        );
     }
 }

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import lombok.NonNull;
 import me.braydon.redis.type.KeyType;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Pipeline;
 
 /**
  * The implementation of the "string" {@link KeyType}.
@@ -17,15 +18,31 @@ public final class StringType extends KeyType {
 
     /**
      * Populate this object with the data
-     * from the given key.
+     * from the given key in Redis.
      * <p>See implementations</p>
      *
      * @param jedis the jedis connection
-     * @param key   the key to get the data from
+     * @param key the key to get the data from
+     * @see Jedis for jedis
      */
     @Override
-    public void populateData(@NonNull Jedis jedis, @NonNull String key) {
-        value = jedis.get(key);
+    public void populateFromRedis(@NonNull Jedis jedis, @NonNull String key) {
+        value = jedis.get(key); // Load the string
+    }
+
+    /**
+     * Save the data in the given json element
+     * to Redis.
+     *
+     * @param pipeline the pipelined jedis connection
+     * @param key the key to save the data to
+     * @param jsonElement the json element containing the data
+     * @see Pipeline for pipeline
+     * @see JsonElement for the json element
+     */
+    @Override
+    public void saveToRedis(@NonNull Pipeline pipeline, @NonNull String key, @NonNull JsonElement jsonElement) {
+        pipeline.set(key, jsonElement.getAsJsonArray().get(0).getAsString()); // Save the string
     }
 
     /**
