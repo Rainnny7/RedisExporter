@@ -1,24 +1,36 @@
 package me.braydon.redis;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpecBuilder;
 import lombok.NonNull;
 import me.braydon.redis.common.FileUtils;
+import me.braydon.redis.type.KeyType;
 import redis.clients.jedis.DefaultJedisClientConfig;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisClientConfig;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Set;
 
 /**
  * @author Braydon
  */
 public final class RedisExporter {
+    private static final Gson GSON = new GsonBuilder()
+            .serializeNulls()
+            .setPrettyPrinting() // This isn't necessary, but it allows users to easily read their exported data
+            .create();
+
     private static OptionSpecBuilder HELP_OPTION;
 
     public static void main(@NonNull String[] args) {
@@ -106,18 +118,71 @@ public final class RedisExporter {
         try (Jedis jedis = new Jedis(host, port, config)) { // Attempt to connect
             System.out.println("Successfully connected!");
             if (export) { // Export the database
-                exportDatabase(dataFile, jedis);
+                exportDatabase(jedis, dataFile);
             } else { // Import the database
-                importDatabase(dataFile, jedis);
+                importDatabase(jedis, dataFile);
             }
         }
     }
 
-    private static void exportDatabase(@NonNull File dataFile, @NonNull Jedis jedis) {
-        throw new UnsupportedOperationException("Not implemented yet");
+    /**
+     * Export the database to the given file.
+     *
+     * @param jedis the jedis connection
+     * @param dataFile the data file to export to
+     */
+    private static void exportDatabase(@NonNull Jedis jedis, @NonNull File dataFile) {
+        Set<String> keys = jedis.keys("*");
+        if (keys.isEmpty()) { // If there are no keys in the database, exit
+            System.out.println("No keys were found in the database, exiting...");
+            return;
+        }
+        System.out.printf("Found %s key(s)%n", keys.size()); // Log the amount of key(s) found
+
+        JsonObject keysObject = new JsonObject();
+        long before = System.currentTimeMillis(); // Get the time before the export
+        int failed = 0; // The amount of keys that failed to export
+        for (String key : keys) {
+            String typeName = jedis.type(key); // The name of the key type
+            Class<? extends KeyType> type = KeyType.TYPES.get(typeName); // Get the type of the key
+            if (type == null) { // If the key type is not supported, skip it
+                failed++;
+                System.err.printf("Cannot export '%s' as the type (%s) is not supported%n", key, typeName);
+                continue;
+            }
+            try {
+                KeyType keyType = type.getConstructor().newInstance(); // Constructor a new instance of the key type class
+                keyType.populateData(jedis, key); // Populate the object with the data from Redis
+
+                JsonObject keyObject = new JsonObject();
+                keyObject.addProperty("type", typeName); // Add the type name to the key json object
+                keyObject.add("data", keyType.getJsonObject()); // Add the key type json object to the key json object
+
+                keysObject.add(key, keyObject); // Add the key json object to the keys json object
+            } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException ex) {
+                failed++;
+                ex.printStackTrace();
+                continue;
+            }
+            System.err.printf("Exported key '%s' (%s)%n", key, typeName); // Log that the key was exported
+        }
+        // Save the json to the data file
+        try (FileWriter writer = new FileWriter(dataFile)) {
+            GSON.toJson(keysObject, writer);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+
+        // Log that the export has finished
+        System.err.printf("Export finished in %sms (success: %s, failed: %s, total: %s)%n",
+                System.currentTimeMillis() - before,
+                keys.size() - failed,
+                failed,
+                keys.size()
+        );
     }
 
-    private static void importDatabase(@NonNull File dataFile, @NonNull Jedis jedis) {
+    private static void importDatabase(@NonNull Jedis jedis, @NonNull File dataFile) {
         throw new UnsupportedOperationException("Not implemented yet");
     }
 }
