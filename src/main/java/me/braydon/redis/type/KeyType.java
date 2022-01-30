@@ -4,7 +4,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import lombok.NonNull;
 import me.braydon.redis.type.impl.HashType;
+import me.braydon.redis.type.impl.ListType;
 import me.braydon.redis.type.impl.SetType;
+import me.braydon.redis.type.impl.StringType;
 import redis.clients.jedis.Jedis;
 
 import java.util.Collections;
@@ -23,8 +25,10 @@ public abstract class KeyType {
      * </p>
      */
     public static final Map<String, Class<? extends KeyType>> TYPES = Collections.synchronizedMap(Map.of(
-            "hash", HashType.class,
-            "set", SetType.class
+            "string", StringType.class,
+            "list", ListType.class,
+            "set", SetType.class,
+            "hash", HashType.class
     ));
 
     /**
