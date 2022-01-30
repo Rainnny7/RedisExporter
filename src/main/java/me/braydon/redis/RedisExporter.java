@@ -156,6 +156,7 @@ public final class RedisExporter {
 
                 JsonObject keyObject = new JsonObject();
                 keyObject.addProperty("type", typeName); // Add the type name to the key json object
+                keyObject.addProperty("ttl", jedis.ttl(key)); // Add the time-to-live to the key json object
                 keyObject.add("data", keyType.getJsonObject()); // Add the key type json object to the key json object
 
                 keysObject.add(key, keyObject); // Add the key json object to the keys json object
